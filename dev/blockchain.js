@@ -6,14 +6,13 @@ const currentNodeUrl = process.argv[3];
 
 function Blockchain() {
     this.chain = [];
+   // new transactions before they are placed into the chain
+    this.pendingTransactions = [];
 
     this.currentNodeUrl = currentNodeUrl;
     this.networkNodes = [];
 
-    // new transactions before they are placed into the chain
-    this.pendingTransactions = [];
-
-    // create genesis block
+     // create genesis block
     // these parameters are totally arbitrary
     this.createNewBlock(0, '0', '0');
 }
@@ -78,12 +77,45 @@ Blockchain.prototype.proofOfWork = function(previousBlockHash, currentBlockData)
     */
    let nonce = 0;
    let hash = this.hashBlock(previousBlockHash, currentBlockData, nonce);
-   while (hash.substr(0, 4) != '0000') {
+   while (hash.substring(0, 4) != '0000') {
         nonce++;
         hash = this.hashBlock(previousBlockHash, currentBlockData, nonce);
    }
 
    return nonce;
+}
+
+/* select the longest chain as the winner */
+Blockchain.prototype.chainIsValid = function(chain) {
+    // iterate over block and make sure the previous block hash is equal to the current block's previousHash
+
+    for (var i=1; i < chain.length; i++) {
+        const currentBlock = chain[i];
+        const prevBlock = chain[i-1];
+        const blockHash = this.hashBlock(
+            prevBlock['hash'], 
+            {transactions: currentBlock['transactions'], index: currentBlock['index']},
+            currentBlock['nonce']
+        );
+        console.log(prevBlock['hash'], blockHash, currentBlock['index'], currentBlock['nonce']);
+        if (blockHash.substring(0, 4) != '0000') {
+             return false;           
+        }
+
+        if ( currentBlock['previousBlockHash'] !==  prevBlock['hash']) { // chain not valid
+             return false;           
+        }
+    }
+
+    const genesisBlock = chain[0];
+    const correctNonce = genesisBlock['nonce'] === 0;
+    const correctPreviousBlockHash = (genesisBlock['previousBlockHash'] === '0');
+    const correctHash = (genesisBlock['hash'] === '0');
+    const correctTransactions = (genesisBlock['transactions'].length === 0);
+    if (!correctTransactions || !correctNonce || !correctHash || !correctPreviousBlockHash)
+        return false;
+
+    return true;
 }
 
 module.exports =  Blockchain;

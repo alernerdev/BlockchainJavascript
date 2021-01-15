@@ -60,23 +60,83 @@ app.get('/mine', function(req, res) {
     const lastBlock = bitcoin.getLastBlock();
     const previousBlockHash = lastBlock['hash'];
     const currentBlockData = {
-        transactons: bitcoin.pendingTransactions,
-        index: lastBlock['index'+1]
+        transactions: bitcoin.pendingTransactions,
+        index: lastBlock['index']+1
     };
 
     const nonce = bitcoin.proofOfWork(previousBlockHash, currentBlockData);
     const blockHash = bitcoin.hashBlock(previousBlockHash, currentBlockData, nonce);
 
-    // reward the miner with a little bit of bitcoin -- it goes into the same block
-    // if the sender address is 00, it is a mining reward
-    // and we want to send this reward to this one node where the mining api was called
-    bitcoin.createNewTransaction(0.001, "00", thisNodeAddress);
-
     const newBlock = bitcoin.createNewBlock(nonce, previousBlockHash, blockHash);
-    res.json({
-        note: 'New block mined successfully',
-        block: newBlock
+
+    const requestPromises = [];
+    bitcoin.networkNodes.forEach(networkNodeUrl => {
+        const requestOptions = {
+            uri: networkNodeUrl + '/recieve-new-block',
+            method: "POST",
+            body: {newBlock: newBlock},
+            json: true
+        };
+        console.log('sending recieve-new-block:' + requestOptions);
+        requestPromises.push(requestPromise(requestOptions));
     });
+
+    Promise.all(requestPromises)
+        // eslint-disable-next-line no-unused-vars
+        .then(data => {
+            /* the way the code is written, the reward will be added to the NEXT block.  Which means that Block 2 is not geeting a reward.
+            It seems that the mining reward should go into the block which was mined, not into a later block
+            */
+            // reward the miner with a little bit of bitcoin -- it goes into the same block
+            // if the sender address is 00, it is a mining reward
+            // and we want to send this reward to this one node where the mining api was called
+            const requestOptions = {
+                uri: bitcoin.currentNodeUrl + '/transaction/broadcast',
+                method: 'POST',
+                body: {
+                    amount: 0.001, 
+                    senderAddress: "00", 
+                    recipientAddress: thisNodeAddress
+                },
+                json: true
+            };
+            console.log(requestOptions);
+            return requestPromise(requestOptions);
+        })
+        // eslint-disable-next-line no-unused-vars
+        .then(data => {
+            res.json({
+                note: 'New block mined and broadcast successfully',
+                block: newBlock
+            });
+        });
+});
+
+
+app.post('/recieve-new-block', function(req, res) {
+    const newBlock = req.body.newBlock;
+    const lastBlock = bitcoin.getLastBlock();
+    const correctHash = (lastBlock.hash === newBlock.previousBlockHash );
+    const correctIndex = (lastBlock['index']+1 === newBlock['index']);
+
+    console.log('recieve-new-block');
+    if (correctHash && correctIndex) {
+        console.log('recieve-new-block is correct');
+
+        bitcoin.chain.push(newBlock);
+        bitcoin.pendingTransactions = [];
+        res.json({
+            note: `New block recieved and accepted`,
+            newBlock: newBlock
+        });
+    } else {
+        console.log('recieve-new-block is rejected');
+
+        res.json({
+            note: `New block rejected`,
+            newBlock: newBlock
+        });
+    }
 });
 
 // register a node and broadcast this node to the whole network
